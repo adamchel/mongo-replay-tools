@@ -41,7 +41,7 @@ def get_args():
 	parser = ArgumentParser(prog="mongoreplay")
 
 	parser.add_argument('--server_config', default='server_config.yml', help='Location of the mongod config file.')
-	parser.add_argument('--state_dump', default='dump', help='Location of the state dump directory.')
+	parser.add_argument('--state_dump', default='state_dump', help='Location of the state dump directory.')
 	parser.add_argument('--workload_file', default='workload.pcap', help='Location of the workload pcap file.')
 
 	return parser.parse_args()
