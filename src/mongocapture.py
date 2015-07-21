@@ -1,28 +1,67 @@
 from paramiko import SSHClient
 from argparse import ArgumentParser
-from subprocess import Popen # poll, send_signal, communicate
-import signal
+from subprocess import Popen, call # poll, send_signal, communicate
+from getpass import getpass
+import select
 
 def get_dump(mstate_dir, mtools_dir, host, port):
-	dumper = Popen(['mongodump', '--oplog', '--host', str(host) + ':' + str(port), '--out=' + str(mstate_dir)], cwd=mtools_dir)
+	print("Attempting to save state of the secondary...")
+	dumper = Popen([mtools_dir + '/mongodump', '--oplog', '--host', str(host) + ':' + str(port), '--out=' + str(mstate_dir)])
+	dumper.wait()
+	if(dumper.returncode != 0):
+		print("Failed to run mongodump.")
+		sys.exit(1)
 
-def ssh_to_primary(host):
+def ssh_to_primary(username, host, port, password):
 	client = SSHClient()
 	client.load_system_host_keys()
-	client.connect(host, username="adam")
+	client.connect(host, username=username, password=password, port=port)
+	return client
 
-def start_recording(ssh_client, msaw_dir, primary_port, primary_host):
+def print_from_paramiko_stream(stream):
+	while(stream.recv_ready()):
+		print(stream.recv(512))
+	while(stream.recv_stderr_ready()):
+		print(stream.recv_stderr(512))
 
-	# TODO connect to a primary on a different host, output the pcap, and scp it over to the localhost
-	stdin, stdout, stderr = ssh_client.exec_command('sudo tcpdump -i lo0 -w workload.pcap dst port' + str(primary_port))
+def record_workload(ssh_client, workload_dir, primary_host, primary_port, primary_username, primary_password):
+	chan = ssh_client.get_transport().open_session()
+	chan.exec_command("sudo -S -p '' tcpdump -i lo0 -w workload.pcap dst port " + str(primary_port))
 
-	#copy = Popen("scp root@" + str(primary_host) + ":workload.pcap /some/local/directory")
+	while(chan.send(primary_password + "\n") == 0):
+		print "password failed to send..."
+		pass
 
-	print "stderr: ", stderr.readlines()
-	print "pwd: ", stdout.readlines()
+	print("Attempting to listen to network traffic on the primary...")
+	interrupted = False
+	while(not interrupted):
+		try:
+			streams = select.select([chan], [], [])
+			for stream in streams[0]:
+				print_from_paramiko_stream(stream)
+		except KeyboardInterrupt:
+			interrupted = True
+			# Finish any incomplete output
+			print_from_paramiko_stream(stream)
+			
+	print("\n")
+	# Stop tcpdump on the primary host
+	killchan = ssh_client.get_transport().open_session()
+	killchan.exec_command("sudo -S -p '' killall tcpdump")
+	while(killchan.send(primary_password + "\n") == 0):
+		print "password failed to send..."
+		pass
+	killchan.recv_exit_status()
 
-#def clean_recording(msaw_dir):
-#	pass
+	# Print any resulting output
+	chan.recv_exit_status()
+	print_from_paramiko_stream(stream)
+
+	# Copy the tcpdump to the local machine
+	print("\nYou will be prompted again for your SSH password on the primary host, to retrieve the workload.")
+	if(call(["scp", str(primary_username) + "@" + str(primary_host) + ":workload.pcap", "./"]) != 0):
+		print("Failed to copy captured workload from primary.")
+		sys.exit(1)
 
 def get_args():
 	parser = ArgumentParser(prog="mongocapture")
@@ -31,17 +70,22 @@ def get_args():
 	parser.add_argument('PRIMARY_PORT', help='The port of mongod on the primary node.')
 	parser.add_argument('SECONDARY_HOST', help='The secondary node from which to create a state backup.')
 	parser.add_argument('SECONDARY_PORT', help='The port of the secondary node.')
-	parser.add_argument('--mongo-tools-dir', help='The directory where mongodump can be found.', default=None)
+	parser.add_argument('--mdir', help='The directory where mongo tools (mongodump) can be found.', default="./")
+	parser.add_argument('--ssh-port', help='The SSH port of the primary host, if not 22.', default=22)
 
 	return parser.parse_args()
 
 if __name__ == "__main__":
 	args = get_args()
 
-	dump_proc = get_dump()
-	dump_proc.wait()
+	# Connect to the primary to prepare for TCP dump.
+	print("Attempting to make an SSH connection to the primary host.")
+	username = raw_input("Primary host username: ")
+	password = getpass("Primary host password: ")
+	primary_client = ssh_to_primary(username, args.PRIMARY_HOST, args.ssh_port, password)
 
-	record_proc = start_recording()
-
-
-
+	# Get a dump of the secondary and save it as the state.
+	get_dump("state_dump", args.mdir, args.SECONDARY_HOST, args.SECONDARY_PORT)
+	
+	# Use TCP dump to record the network traffic going into the primary.
+	record_workload(primary_client, ".", args.PRIMARY_HOST, args.PRIMARY_PORT, username, password)
