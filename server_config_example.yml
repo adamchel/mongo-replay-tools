@@ -1,3 +1,4 @@
 servers:
 - --storageEngine=mmapv1
 - --storageEngine=wiredTiger
+tmp_db_path: tmp_db
