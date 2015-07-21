@@ -6,8 +6,8 @@ Set up test mongod instances with given configurations and replay a target workl
 
 ```shell
 
-	git clone 
-	cd 
+	git clone https://github.com/adamchel/mongo-replay-tools
+	cd mongo-replay-tools
 
 	# Capture the existing state of the DB
 	./mongocapture
