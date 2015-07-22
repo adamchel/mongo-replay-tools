@@ -131,12 +131,13 @@ def play_workload(workload, quiet=False):
 	if quiet:
 		with open(os.devnull, 'w') as devnull:
 			load_workload = subprocess.Popen([
-				"mongosniff",
-				"--source",
-				"FILE",
-				workload,
-				"--forward",
-				"127.0.0.1:27017"
+				"mongo-tcp-replay/mongo-tcp-replay",
+				"-mongodHost",
+				"localhost",
+				"-mongodPort",
+				"27017",
+				"-pcapFile",
+				workload
 			], stdout=devnull)
 	else:
 		f = open("sniff.out", 'w+')
