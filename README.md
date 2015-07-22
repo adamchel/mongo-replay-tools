@@ -10,12 +10,12 @@ Set up test mongod instances with given configurations and replay a target workl
 	cd mongo-replay-tools
 
 	# Capture the existing state of the DB
-	./mongocapture
+	./mongocapture 10.4.117.138 30000 10.4.117.138 30001 --mdir ~/mongodbdl/bin --ssh-port 2222 --net-device eth0
 
  	# Modify as desired
 	cp server_config_example.yml server_config.yml
 
 	# Replay the existing state and captured workload on each server in server_config
-	./mongoreplay
+	./mongoreplay --mongod-host=localhost --mongod-port=27017 --server-config=server_config.yml --state-dump=state_dump --workload-file=workload.pcap
 
 ```

@@ -4,3 +4,4 @@ workload.pcap
 tmpdb
 dump
 mongo-tcp-replay/
+mongo-workload/
