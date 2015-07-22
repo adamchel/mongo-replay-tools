@@ -3,6 +3,7 @@ from argparse import ArgumentParser
 from subprocess import Popen, call # poll, send_signal, communicate
 from getpass import getpass
 import select
+import sys
 
 def get_dump(mstate_dir, mtools_dir, host, port):
 	print("Attempting to save state of the secondary...")

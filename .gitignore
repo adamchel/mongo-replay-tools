@@ -3,3 +3,4 @@ server_config.yml
 workload.pcap
 tmpdb
 dump
+mongo-tcp-replay/
