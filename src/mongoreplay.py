@@ -62,24 +62,24 @@ def read_server_config(server_config_file):
 		db_path = yaml_stream['tmp_db_path']
 	return servers, db_path
 
-def replay(servers, state, workload, db_path):
+def replay(host, port, servers, state, workload, db_path):
 	"""Replays on all servers and collect data"""
 	print "Replaying workload on servers..."
 	performance_metrics = {}
 	for server_config in servers:
 		print "Replaying workload on " + server_config[16:] + " config"
-		metric = replay_and_aggregate(server_config, state, workload, db_path)
+		metric = replay_and_aggregate(host, port, server_config, state, workload, db_path)
 		performance_metrics[server_config] = metric
 		time.sleep(1)
 	return performance_metrics
 
-def get_workload_stats(db_path, state, workload):
+def get_workload_stats(host, port, db_path, state, workload):
 	"""Gets the specific statistics about the workload (avgObjSize, r/w ratio)"""
 	workload_stats = {}
 	md = create_mongod("", db_path)
 	load_data(state)
-	play_workload(workload)
-	c = pymongo.MongoClient(host = "127.0.0.1", port = 27017)
+	play_workload(host, port, workload)
+	c = pymongo.MongoClient(host, int(port))
 	print c.database_names()
 	for db in c.database_names():
 		if db != "local":
@@ -96,11 +96,11 @@ def get_workload_stats(db_path, state, workload):
 
 	return workload_stats
 
-def replay_and_aggregate(server_config, state, workload, db_path):
+def replay_and_aggregate(host, port, server_config, state, workload, db_path):
 	"""Replay on a single server and aggregate data from that server"""
 	md = create_mongod(server_config, db_path)
 	load_data(state)
-	metric = play_workload(workload, quiet=True)
+	metric = play_workload(host, port, workload, quiet=True)
 	kill_mongod(md, db_path)
 	return metric
 
@@ -126,16 +126,16 @@ def load_data(state):
 	"""Load the state into the running mongod server"""
 	subprocess.call(["mongorestore", "--maintainInsertionOrder", state])
 
-def play_workload(workload, quiet=False):
+def play_workload(host, port, workload, quiet=False):
 	metric = {}
 	if quiet:
 		with open(os.devnull, 'w') as devnull:
 			load_workload = subprocess.Popen([
 				"mongo-tcp-replay/mongo-tcp-replay",
 				"-mongodHost",
-				"localhost",
+				host,
 				"-mongodPort",
-				"27017",
+				port,
 				"-pcapFile",
 				workload
 			], stdout=devnull)
@@ -147,7 +147,7 @@ def play_workload(workload, quiet=False):
 			"FILE",
 			workload,
 			"--forward",
-			"127.0.0.1:27017"
+			host + ":" + port
 		], stdout=f)
 		f.close()
 	# Get the resource usage of the workload
@@ -156,35 +156,45 @@ def play_workload(workload, quiet=False):
 	metric['workload_time'] = workload_time
 	return metric
 
-def change_port(source, dest, workload):
+def change_port(source, dest, infile, outfile):
+	from uuid import getnode as get_mac
+	mac = hex(get_mac())
 	subprocess.Popen([
 		"tcprewrite",
-		"--portmap="+source+":"+dest,
-		"--infile="+workload,
-		"--outfile="+workload
+		"--portmap=" + source + ":" + dest,
+		"--infile=" + infile,
+		"--outfile=" + outfile,
+		"--dlt=enet",
+		"--enet-dmac=" + mac,
+		"--enet-smac=" + mac
 	])
 
 def get_args():
 	parser = ArgumentParser(prog="mongoreplay")
 
-	parser.add_argument('--server_config', default='server_config.yml', help='Location of the mongod config file.')
-	parser.add_argument('--state_dump', default='state_dump', help='Location of the state dump directory.')
-	parser.add_argument('--workload_file', default='workload.pcap', help='Location of the workload pcap file.')
-	parser.add_argument('--original_host_port', default='30000', help='The original host port number.')
+	parser.add_argument('--mongod-host', default='localhost', help='address of mongod host')
+	parser.add_argument('--mongod-port', default='27017', help='port of mongod at host')
+	parser.add_argument('--server-config', default='server_config.yml', help='Location of the mongod config file.')
+	parser.add_argument('--state-dump', default='state_dump', help='Location of the state dump directory.')
+	parser.add_argument('--workload-file', default='workload.pcap', help='Location of the workload pcap file.')
+	parser.add_argument('--original-host-port', default='30000', help='The original host port number.')
 
 	return parser.parse_args()
 
 if __name__ == "__main__":
 	args = get_args()
 
+	mongod_host = args.mongod_host
+	mongod_port = args.mongod_port
 	servers, db_path = read_server_config(args.server_config)
 	state = args.state_dump
 	workload = args.workload_file
 	original_host_port = args.original_host_port
 
-	change_port(original_host_port, "27017", workload)
-	workload_stats = get_workload_stats(db_path, state, workload)
-	performance_metrics = replay(servers, state, workload, db_path)
+	outfile = "sniff.pcap"
+	change_port(original_host_port, mongod_port, workload, outfile)
+	workload_stats = get_workload_stats(mongod_host, mongod_port, db_path, state, outfile)
+	performance_metrics = replay(mongod_host, mongod_port, servers, state, workload, db_path)
 
 	print "Workload stats:"
 	pprint(workload_stats)
